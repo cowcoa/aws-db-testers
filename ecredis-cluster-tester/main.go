@@ -19,16 +19,18 @@ import (
 func main() {
 	// Get parameters
 	endpoint := flag.String("endpoint", "", "Configuration endpoint(hostname:port)")
-	operation := flag.String("operation", "w", "Run tester in 'w' or 'r' mode")
 	password := flag.String("password", "", "Cluster credential")
+	operation := flag.String("operation", "r", "Run tester in 'w' or 'r' mode")
+	count := flag.Int("count", 10, "Number of operations")
+	concurrency := flag.Int("concurrency", 5, "Number of concurrent operations")
 
-	if len(os.Args) != 4 {
+	if len(os.Args) < 2 {
 		fmt.Println("Continuously read and write redis cluster and output the results")
 		fmt.Println()
 		flag.Usage()
 		fmt.Println()
 		fmt.Println("Example:")
-		fmt.Printf("%s --endpoint=clustercfg.cdkgoexample-rediscluster.bcvgti.apne1.cache.amazonaws.com:6379 --operation=w --password=mysecret \n\n", os.Args[0])
+		fmt.Printf("%s --endpoint=clustercfg.cdkgoexample-rediscluster.bcvgti.apne1.cache.amazonaws.com:6379 --operation=w --password=mysecret --count=1000 --concurrency=10 \n\n", os.Args[0])
 		os.Exit(1)
 	}
 	flag.Parse()
@@ -36,6 +38,13 @@ func main() {
 	if *operation != "w" && *operation != "r" {
 		fmt.Println()
 		fmt.Println("Invalid 'operation' parameter, valid values are 'w' or 'r'")
+		fmt.Println()
+		os.Exit(1)
+	}
+
+	if len(*endpoint) == 0 {
+		fmt.Println()
+		fmt.Println("Missing 'endpoint' parameter")
 		fmt.Println()
 		os.Exit(1)
 	}
@@ -81,9 +90,9 @@ func main() {
 
 	// Do the test job
 	if *operation == "w" {
-		WriteTest(rdb, ctx)
+		WriteTest(rdb, ctx, *count, *concurrency)
 	} else if *operation == "r" {
-		ReadTest(rdb, ctx)
+		ReadTest(rdb, ctx, *count, *concurrency)
 	}
 
 	stats := rdb.PoolStats()
@@ -101,8 +110,8 @@ func RandStringBytes(n int) string {
 	return string(b)
 }
 
-func WriteTest(rdb *goredis.ClusterClient, ctx context.Context) {
-	AllMaxRun := 6
+func WriteTest(rdb *goredis.ClusterClient, ctx context.Context, count int, concurrency int) {
+	AllMaxRun := concurrency
 
 	wg := sync.WaitGroup{}
 	wg.Add(AllMaxRun)
@@ -111,7 +120,7 @@ func WriteTest(rdb *goredis.ClusterClient, ctx context.Context) {
 		go func(wg *sync.WaitGroup, idx int) {
 			defer wg.Done()
 
-			for i := 0; i < 50000; i++ {
+			for i := 0; i < count; i++ {
 				key := "test-" + strconv.Itoa(i)
 				val := RandStringBytes(6)
 				_, err := rdb.Set(ctx, key, val, 0).Result()
@@ -128,12 +137,12 @@ func WriteTest(rdb *goredis.ClusterClient, ctx context.Context) {
 	wg.Wait()
 }
 
-func ReadTest(rdb *goredis.ClusterClient, ctx context.Context) {
+func ReadTest(rdb *goredis.ClusterClient, ctx context.Context, count int, concurrency int) {
 	rdb.Set(ctx, "test-0", "value-0", 0)
 	rdb.Set(ctx, "test-1", "value-1", 0)
 	rdb.Set(ctx, "test-2", "value-2", 0)
 
-	AllMaxRun := 6
+	AllMaxRun := concurrency
 
 	wg := sync.WaitGroup{}
 	wg.Add(AllMaxRun)
@@ -142,7 +151,7 @@ func ReadTest(rdb *goredis.ClusterClient, ctx context.Context) {
 		go func(wg *sync.WaitGroup, idx int) {
 			defer wg.Done()
 
-			for i := 0; i < 50000; i++ {
+			for i := 0; i < count; i++ {
 				key := "test-" + strconv.Itoa(i%3)
 				val, err := rdb.Get(ctx, key).Result()
 				if err == goredis.Nil {
